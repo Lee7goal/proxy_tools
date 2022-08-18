@@ -138,22 +138,8 @@ class ProxyCheckAvailable:
                     else:
                         # 删除
                         self.db.delete('proxy_crawler', f'ip = "{i["ip"]}"')
-                time.sleep(1)
             self.db.conn.commit()
 
-    def run(self):
-        while True:
-            try:
-                self.check_proxy()
-                time.sleep(20)
-            except KeyboardInterrupt:
-                logger.info(f"用户主动退出系统")
-                quit()
 
 
-if __name__ == '__main__':
-    pc = ProxyCollection()
-    pc.insert_prepare()
-    pc.crawl_kuaidaili()
-    pca = ProxyCheckAvailable()
-    pca.run()
+

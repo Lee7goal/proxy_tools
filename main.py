@@ -18,5 +18,4 @@ async def say_hello(name: str):
 @app.get("/proxy")
 async def get_proxy():
     proxy_list = db.select('proxy_available')
-
     return {'status': 200, 'proxy': proxy_list}
