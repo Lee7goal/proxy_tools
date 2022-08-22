@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from sqlite_lee_tools.main import DataBasel
+from ProxyTools import pm
 
 app = FastAPI()
-db = DataBasel('proxy.sqlite3')
+
 
 
 @app.get("/")
@@ -17,5 +17,5 @@ async def say_hello(name: str):
 
 @app.get("/proxy")
 async def get_proxy():
-    proxy_list = db.select('proxy_available')
+    proxy_list = pm.select(pm.collect_conn, 'wait_proxy')
     return {'status': 200, 'proxy': proxy_list}

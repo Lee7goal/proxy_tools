@@ -1,8 +1,8 @@
 from apscheduler.schedulers.blocking import BlockingScheduler
-from ProxyTools import ProxyManager
+from ProxyTools import pm
 
 
-pm = ProxyManager()
+
 
 
 

@@ -45,12 +45,12 @@ class ProxyManager:
 
     # 获取所有值
     @staticmethod
-    def select(db):
+    def select(db, key):
         _ = []
-        all_ip = db.zrange("proxy", 0, -1)
+        all_ip = db.zrange(key, 0, -1)
         for ip in all_ip:
             real_proxy = str(ip).replace('b', '').replace("'", "")
-            score = str(db.zscore('proxy', real_proxy)).replace('.0', '')
+            score = str(db.zscore(key, real_proxy)).replace('.0', '')
             _.append({
                 'ip': real_proxy,
                 'score': score
@@ -117,3 +117,4 @@ class ProxyManager:
 
 
 
+pm = ProxyManager()
