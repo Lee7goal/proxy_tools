@@ -1,43 +1,61 @@
+import random
 import requests
 from loguru import logger
 import datetime
 import time
-from sqlite_lee_tools.main import DataBasel
 from lxml import etree
+import redis
 
 
-class ProxyCollection:
-    """
-    采集类
-    """
+class ProxyManager:
     def __init__(self):
-        self.db = DataBasel('proxy.sqlite3')
-        self.sleep_times = 20
-        self.init_table()
+        self.db = redis.ConnectionPool(host='127.0.0.1', port=6379, password="lee7goal")
+        self.collect_conn = redis.Redis(connection_pool=self.db, max_connections=10, db=0)
+        self.valid_conn = redis.Redis(connection_pool=self.db, max_connections=10, db=1)
 
-    def init_table(self):
-        cursor = self.db.conn.execute('SELECT count(*) FROM sqlite_master WHERE type="table" AND name = "proxy_crawler"')
-        for row in cursor:
-            exist = row[0]
-        if exist == 1:
-            logger.info("proxy_crawler 表已存在")
-            return
-        logger.info("proxy_crawler 创建中")
-        # 确定表结构
-        table_struct = {
-            'ip': 'Char(30)-',
-            'privacy': 'Text',
-            'proxy_type': 'Text-',
-            'proxy_local': 'Char(35)',
-            'response_speed': 'Text-',
-            'last_available_time': 'Char(20)-',
-            'fail_count': 'Tinyint-'
-        }
-        # 创建数据库
-        self.db.create_table('proxy_crawler', table_struct)
+    @staticmethod
+    def insert(db, key, proxy, score):
+        db.zadd(key, {proxy: score})
+        logger.info(f"{proxy}分数为{score}添加到数据库{db}成功")
 
-    def insert_prepare(self):
-        self.db.open_begin()
+    # 删除
+    @staticmethod
+    def delete(db, value):
+        try:
+            db.zrem('proxy', value)
+            logger.info(f"删除{value}的条目成功")
+        except Exception as e:
+            logger.error(e)
+
+    @staticmethod
+    def get_max_num(db, key):
+        max_num = db.zcard('key')
+        return max_num
+
+    # 随机获取一个值
+    def get_random_proxy(self, db):
+        max_num = self.get_max_num(db, 'proxy')
+        random_int = random.randint(0, max_num)
+        random_ip = db.zrange('proxy', 0, random_int)
+
+        if not random_ip:
+            print("", "")
+        proxy_str = str(random_ip[0]).replace('b', '').replace("'", "")
+        return proxy_str
+
+    # 获取所有值
+    @staticmethod
+    def select(db):
+        _ = []
+        all_ip = db.zrange("proxy", 0, -1)
+        for ip in all_ip:
+            real_proxy = str(ip).replace('b', '').replace("'", "")
+            score = str(db.zscore('proxy', real_proxy)).replace('.0', '')
+            _.append({
+                'ip': real_proxy,
+                'score': score
+            })
+        return _
 
     def crawl_kuaidaili(self, max_page=10):
         headers = {
@@ -47,58 +65,17 @@ class ProxyCollection:
             resp = requests.get(f'https://free.kuaidaili.com/free/inha/{page + 1}/', headers=headers)
             resp.encoding = 'utf-8'
             content = resp.text
-            # content = open('free_proxy_site_demo/kuaidaili.html', 'r', encoding='utf-8').read()
             html = etree.HTML(content)
-            # //*[@id="main"]/div[1]/div[2]/div[1]/table
             proxy_info_list = html.xpath('//div[@id="list"]/table/tbody/tr')
             if len(proxy_info_list) == 0:
-                quit()
+                continue
             for proxy_info in proxy_info_list:
                 info_list = proxy_info.xpath('./td/text()')
-                proxy_struct = {
-                    'ip': f"{info_list[0]}:{info_list[1]}",
-                    'privacy': info_list[2],
-                    'proxy_type': info_list[3],
-                    'proxy_local': info_list[4],
-                    'response_speed': info_list[5],
-                    'last_available_time': info_list[6],
-                    'fail_count': 0
-                }
-                self.db.insert('proxy_crawler', proxy_struct)
-            self.db.conn.commit()
+                proxy = f"{info_list[0]}:{info_list[1]}"
+                score = 100
+                self.insert(self.collect_conn, 'proxy', proxy, score)
             time.sleep(10)
         logger.info(f'快代理{max_page}页数据入库成功')
-
-
-class ProxyCheckAvailable:
-    """
-    代理可用性检测脚本
-    """
-    def __init__(self):
-        self.db = DataBasel('proxy.sqlite3')
-        self.sleep_times = 20
-        self.init_table()
-
-    def init_table(self):
-        cursor = self.db.conn.execute('SELECT count(*) FROM sqlite_master WHERE type="table" AND name = "proxy_available"')
-        for row in cursor:
-            exist = row[0]
-        if exist == 1:
-            logger.info("proxy_available 表已存在")
-            return
-        logger.info("proxy_available 创建中")
-        # 确定表结构
-        table_struct = {
-            'ip': 'Char(30)-',
-            'privacy': 'Text',
-            'proxy_type': 'Text-',
-            'proxy_local': 'Char(35)',
-            'response_speed': 'Text-',
-            'last_available_time': 'Char(20)-',
-            'fail_count': 'Tinyint-'
-        }
-        # 创建数据库
-        self.db.create_table('proxy_available', table_struct)
 
     @staticmethod
     def single_proxy_check(proxy):
@@ -119,27 +96,24 @@ class ProxyCheckAvailable:
             logger.info(f"代理 {proxy['ip']} 不可用, 失败次数 + 1")
         return response_speed, now
 
-    def check_proxy(self):
-        proxy_data = self.db.select('proxy_crawler')
-        if len(proxy_data) > 0:
-            for i in proxy_data:
+    def check_all(self):
+        # 获取所有可用代理
+        all_proxy = self.select(self.collect_conn)
+        if len(all_proxy) > 0:
+            for i in all_proxy:
                 response_speed, now_time = self.single_proxy_check(i)
                 if response_speed is not None:
                     # 添加进检查完毕的数据库
-                    i['response_speed'] = f'{response_speed:.3f}秒'
-                    i['last_available_time'] = now_time
-                    i['fail_count'] = 0
-                    self.db.insert('proxy_available', i)
-                    self.db.delete('proxy_crawler', f'ip = "{i["ip"]}"')
+                    self.insert(self.valid_conn, 'wait_proxy', i['ip'], i['score'])
+                    self.delete(self.collect_conn, i['ip'])
                 else:
-                    if i['fail_count'] < 3:
-                        fail_count = i['fail_count'] + 1
-                        self.db.update('proxy_crawler', f'fail_count = {fail_count}', f'ip = "{i["ip"]}"')
-                    else:
+                    score = int(i['score'])
+                    if score < 70:
                         # 删除
-                        self.db.delete('proxy_crawler', f'ip = "{i["ip"]}"')
-            self.db.conn.commit()
-
+                        self.delete(self.collect_conn, i['ip'])
+                    else:
+                        # 扣分
+                        self.insert(self.collect_conn, 'proxy', i['ip'], score-3)
 
 
 
