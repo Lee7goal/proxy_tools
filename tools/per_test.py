@@ -8,6 +8,6 @@ def curl():
 
 if __name__ == '__main__':
     t = time.time()
-    for i in range(1000):
+    for i in range(100):
         Thread(target=curl).start()
     print(time.time() - t)
